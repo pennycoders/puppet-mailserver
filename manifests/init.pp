@@ -237,3 +237,4 @@ ALTER TABLE ONLY transport
   include dovecot::imap
   include dovecot::base
   include dovecot::auth
+}
