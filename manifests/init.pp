@@ -19,6 +19,9 @@ class mailserver (
   $postmaster_address    = "root@${::fqdn}",
   $message_size_limit    = '60485760',
   $default_quota         = '10485760',) {
+  include clamav
+  Class['amavis'] -> Class['clamav']
+  include amavis
   $users_defaults    = {
     'quota'  => $default_quota,
     'dbname' => $dbname,
@@ -31,6 +34,14 @@ class mailserver (
 
   maildomain { $domains: dbname => $dbname, }
 
+  class { 'amavis::config':
+    bypass_virus_checks_maps => '(\%bypass_virus_checks, \@bypass_virus_checks_acl, \$bypass_virus_checks_re);',
+    bypass_spam_checks_maps  => '(\%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re);',
+    final_virus_destiny      => 'D_REJECT; # (defaults to D_BOUNCE)',
+    final_banned_destiny     => 'D_REJECT;  # (defaults to D_BOUNCE)',
+    final_spam_destiny       => 'D_PASS;  # (defaults to D_REJECT)',
+    final_bad_header_destiny => 'D_PASS;  # (defaults to D_PASS), D_BOUNCE suggested',
+  }
   include postgresql::server
 
   postgresql::db { $dbname:
@@ -78,6 +89,8 @@ ALTER TABLE ONLY transport
   Service['dovecot'] -> Package['postfix']
   Package['postfix-pgsql'] -> Service['postfix']
 
+  Class['amavis::config'] -> Class['postfix']
+
   class { 'postfix': }
 
   class { 'postfix::postgres':
@@ -91,6 +104,7 @@ ALTER TABLE ONLY transport
     append_dot_mydomain => 'no',
     biff                => 'no',
     broken_sasl_auth_clients             => 'no',
+    content_filter      => 'amavis:[127.0.0.1]:10024',
     disable_vrfy_command                 => 'yes',
     import_environment  => 'MAIL_CONFIG MAIL_DEBUG MAIL_LOGTAG TZ XAUTHORITY DISPLAY LANG=C RESOLV_MULTI=on',
     mail_spool_directory                 => '/var/mail',
@@ -151,6 +165,14 @@ ALTER TABLE ONLY transport
     -o milter_macro_daemon_name=ORIGINATING"'
   }
 
+  postfix::config::mastercf { 'amavis':
+    type    => 'unix',
+    limit   => '2',
+    chroot  => 'y',
+    command => '"smtp
+        -o smtp_data_done_timeout=1200
+        -o smtp_send_xforward_command=yes"'
+  }
 
   postfix::config::mastercf { 'dovecot':
     type         => 'unix',
@@ -214,4 +236,4 @@ ALTER TABLE ONLY transport
   class { 'dovecot::lda': postmaster_address => $postmaster_address }
   include dovecot::imap
   include dovecot::base
-  include dovecot::aut
+  include dovecot::auth
